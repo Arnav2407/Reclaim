@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-[#0B1220] text-[#F8FAFC] antialiased selection:bg-[#10B981]/30 selection:text-white font-sans;
+    background-color: #0B1220;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight text-[#F8FAFC];
+  }
+}
+
+/* Custom modern scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1220;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #24344D;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334B6E;
+}
+
+/* Subtle fintech pulse animation */
+@keyframes subtle-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.05);
+  }
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 2.5s infinite ease-in-out;
+}
+
+/* Financial data tabular figures */
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glass & Surface styling utilities */
+.surface-card {
+  @apply bg-[#111C2E] border border-[#24344D] rounded-xl transition-all duration-200;
+}
+
+.surface-card:hover {
+  @apply border-[#334B6E] bg-[#17243A];
+}
+
+.surface-elevated {
+  @apply bg-[#17243A] border border-[#24344D] rounded-xl;
+}
