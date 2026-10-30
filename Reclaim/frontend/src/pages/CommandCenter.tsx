@@ -38,6 +38,20 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  const handleRunFullDemo = async () => {
+    setLoadingAction('demo');
+    setActionMessage(null);
+    try {
+      const res = await api.runFullDemo();
+      setActionMessage(res.message || 'Full 5-minute autonomous recovery demo executed successfully!');
+      onRefresh();
+    } catch (e: any) {
+      setActionMessage(`Error: ${e.message}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const handleGenerateBatch = async () => {
     setLoadingAction('generate');
     setActionMessage(null);
@@ -149,6 +163,16 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
           {/* Quick Simulation Batch Controls */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {/* Run Full Demo (Left of Ingest) */}
+            <button
+              onClick={handleRunFullDemo}
+              disabled={!!loadingAction}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white rounded-lg text-xs font-bold shadow-emerald-glow border border-emerald-400/30 transition disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-200 animate-pulse" />
+              <span>{loadingAction === 'demo' ? 'Running End-to-End Demo...' : '⚡ Run Full Demo'}</span>
+            </button>
+
             <button
               onClick={handleGenerateBatch}
               disabled={!!loadingAction}

@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+reclaim.db
+reclaim.db-journal
+.env
+.env.local
+.git/
+frontend/node_modules/
+node_modules/
+

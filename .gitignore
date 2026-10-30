@@ -1,0 +1,35 @@
+# Ignore other projects and personal files in parent directory
+/C course/
+/College DSA/
+/DineIQ/
+/DSA/
+/GennextIT/
+/JavaScript/
+/MongoDB/
+/NodeJS/
+/Notes/
+/Portfolix/
+/Projects/
+/Python/
+/React/
+/To Delete/
+/ToDoDeployed/
+recovery-codes.txt
+
+# Python & virtual environments
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+*.db-journal
+
+# Node
+node_modules/
+dist/
+.env
+.env.*
+.DS_Store
+Thumbs.db

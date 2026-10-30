@@ -2,7 +2,7 @@ import asyncio
 import sys
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -11,9 +11,8 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from app.core.database import init_db, AsyncSessionLocal
-from app.simulator.generator import CaseGenerator
-from app.services.recovery_runner import recovery_runner
-from app.services.analytics_service import AnalyticsService
+from app.api.simulation import generate_batch_cases, run_batch_simulation, reset_database
+from app.services.analytics_service import analytics_service
 from app.services.razorpay_service import razorpay_service
 from app.policy.engine import PolicyEngine
 from app.agents.orchestrator import RecoveryOrchestratorAgent, LLMDecisionInput
@@ -52,14 +51,7 @@ async def run_full_5min_demo(fast_mode: bool = True):
     print("[*] Clearing database to ensure fresh clean-room demonstration...")
     
     async with AsyncSessionLocal() as db:
-        await db.execute(delete(CommunicationLog))
-        await db.execute(delete(PolicyCheck))
-        await db.execute(delete(AgentDecision))
-        await db.execute(delete(RecoveryAttempt))
-        await db.execute(delete(RecoveryCase))
-        await db.execute(delete(Order))
-        await db.execute(delete(Customer))
-        await db.commit()
+        await reset_database(db)
 
     print("[*] Generating calibrated 500-case dataset across:")
     print("    1. Payment Failures (40%)      — Card declines, OTP drops, bank errors")
@@ -68,11 +60,9 @@ async def run_full_5min_demo(fast_mode: bool = True):
     print("    4. Overdue Invoices (15%)      — B2B invoices with high-value > ₹50k cases\n")
 
     async with AsyncSessionLocal() as db:
-        generator = CaseGenerator(db)
-        cases = await generator.generate_batch(target_count=500)
-        total_at_risk = sum(c.amount for c in cases)
-        print(f"[+] Successfully ingested {len(cases)} cases.")
-        print(f"[+] Total Revenue at Risk Identified: Rs. {total_at_risk:,.2f}")
+        gen_res = await generate_batch_cases(count=500, db=db)
+        print(f"[+] Successfully ingested {gen_res['cases_created']} cases.")
+        print(f"[+] Total Revenue at Risk Identified: {gen_res['formatted_revenue']} (Rs. {gen_res['total_revenue_at_risk']:,.2f})")
 
     if not fast_mode:
         await asyncio.sleep(3)
@@ -85,9 +75,8 @@ async def run_full_5min_demo(fast_mode: bool = True):
     
     start_time = time.time()
     async with AsyncSessionLocal() as db:
-        result = await recovery_runner.process_batch(db=db, limit=500, simulate_outcomes=True)
-        analytics = AnalyticsService(db)
-        metrics = await analytics.get_dashboard_metrics()
+        sim_result = await run_batch_simulation(limit=500, db=db)
+        metrics = sim_result["metrics"]
 
     elapsed = time.time() - start_time
     print(f"[+] Batch processed in {elapsed:.2f} seconds!")
@@ -189,47 +178,47 @@ async def run_full_5min_demo(fast_mode: bool = True):
 
         decision, _ = await orchestrator.decide_strategy(case_input)
         policy_result = policy.evaluate(
-            action=decision.action,
-            amount=replan_case.amount,
-            attempt_number=2,
-            discount_offered=decision.discount_percentage,
-            has_dispute=False,
-            has_opted_out=False,
-            customer_language=replan_cust.language_preference,
+            case_input=case_input,
+            proposed=decision,
+            existing_attempt_count=1,
         )
 
+        final_amount = replan_case.amount * (1 - policy_result.applied_discount / 100)
+
         new_link = razorpay_service.create_payment_link(
-            amount=replan_case.amount * (1 - policy_result.discount_applied / 100),
+            amount=final_amount,
             customer_name=replan_cust.name,
             customer_email=replan_cust.email,
             customer_phone=replan_cust.phone,
             reference_id=f"rec_{replan_case.id}_att_2",
         )
 
-        msg_body = communicator.generate_message(
+        msg_dict = communicator.generate_message(
             channel=decision.channel or "email",
             language=replan_cust.language_preference,
             customer_name=replan_cust.name,
-            amount=replan_case.amount * (1 - policy_result.discount_applied / 100),
+            amount=final_amount,
             payment_link=new_link["short_url"],
-            discount_pct=policy_result.discount_applied,
             case_type=replan_case.case_type,
+            discount_percentage=policy_result.applied_discount,
+            attempt_number=2,
         )
+        msg_body = msg_dict.get("body", "")
 
         att2 = RecoveryAttempt(
             case_id=replan_case.id,
             attempt_number=2,
             strategy="payment_link",
-            channel=decision.channel,
-            discount_offered=policy_result.discount_applied,
+            channel=decision.channel or "email",
+            discount_offered=policy_result.applied_discount,
             outcome="paid",
-            outcome_details="Payment completed via Email recovery link.",
+            outcome_details="Payment completed via Email recovery link (Replanned).",
         )
         db.add(att2)
 
         replan_case.status = "recovered"
-        replan_case.recovered_amount = replan_case.amount * (1 - policy_result.discount_applied / 100)
-        replan_case.recovered_at = datetime.utcnow()
+        replan_case.recovered_amount = final_amount
+        replan_case.recovered_at = datetime.now(timezone.utc)
         replan_case.attempt_count = 2
         replan_case.razorpay_payment_link_id = new_link["id"]
         replan_case.razorpay_short_url = new_link["short_url"]
@@ -238,8 +227,8 @@ async def run_full_5min_demo(fast_mode: bool = True):
 
         await db.commit()
 
-        print(f"    - New Replanned Channel: {decision.channel.upper()}")
-        print(f"    - Recovery Discount:    {policy_result.discount_applied}%")
+        print(f"    - New Replanned Channel: {(decision.channel or 'email').upper()}")
+        print(f"    - Recovery Discount:    {policy_result.applied_discount}%")
         print(f"    - Razorpay Payment Link: {new_link['short_url']}")
         print(f"    - Outreach Preview:     {msg_body[:100]}...")
         print("    - Customer Payment:     [SUCCESS] Paid via Razorpay Webhook!")
@@ -345,8 +334,7 @@ async def run_full_5min_demo(fast_mode: bool = True):
     print_banner("STAGE 6: AUDIT CERTIFICATE & FINAL SCORECARD")
     
     async with AsyncSessionLocal() as db:
-        analytics = AnalyticsService(db)
-        final_metrics = await analytics.get_dashboard_metrics()
+        final_metrics = await analytics_service.get_dashboard_metrics(db)
 
     print(f" [✓] Revenue at Risk Identified:   Rs. {final_metrics.total_revenue_at_risk:,.2f} (~500 cases)")
     print(f" [✓] Measured Revenue Recovered:    Rs. {final_metrics.total_revenue_recovered:,.2f}")
